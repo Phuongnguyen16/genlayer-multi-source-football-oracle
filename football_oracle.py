@@ -1,15 +1,11 @@
-
-import json
 from genlayer import *
 
-class FootballPredictionMarket(gl.Contract):
-    match_id: str
-    home_team: str
-    away_team: str
-    is_resolved: bool
-    winning_team: str
-    final_score: str
-
+@gl.contract
+class FootballOracle:
+    """
+    GenVM-compatible Football Prediction Oracle
+    """
+    
     def __init__(self, match_id: str, home_team: str, away_team: str):
         self.match_id = match_id
         self.home_team = home_team
@@ -18,36 +14,9 @@ class FootballPredictionMarket(gl.Contract):
         self.winning_team = ""
         self.final_score = ""
 
-    @gl.public.write
-    def resolve_match(self, match_url: str) -> None:
-        # Fetch web page using GenLayer nondeterministic web access
-        web_data = gl.get_web_page(match_url)
-        
-        # Define prompt for validator AI execution
-        prompt = f"""
-        Extract the football match result for {self.home_team} vs {self.away_team} from this web content:
-        {web_data}
-        
-        Return ONLY a JSON object with keys:
-        - "winner": string ("home", "away", or "draw")
-        - "score": string (e.g. "2-1")
-        """
-        
-        # Equivalence Principle verification callback
-        def equivalence_principle(result_str: str) -> bool:
-            data = json.loads(result_str)
-            return "winner" in data and "score" in data
-
-        ai_response = gl.exec_prompt(prompt, eq_principle=equivalence_principle)
-        parsed_result = json.loads(ai_response)
-
-        # Update contract states
-        self.winning_team = parsed_result["winner"]
-        self.final_score = parsed_result["score"]
-        self.is_resolved = True
-
-    @gl.public.read
-    def get_match_status(self) -> dict:
+    @gl.public.view
+    def get_match_info(self) -> dict:
+        """Trả về thông tin trận đấu"""
         return {
             "match_id": self.match_id,
             "home_team": self.home_team,
@@ -55,4 +24,34 @@ class FootballPredictionMarket(gl.Contract):
             "is_resolved": self.is_resolved,
             "winning_team": self.winning_team,
             "final_score": self.final_score
+        }
+
+    @gl.public.write
+    def resolve_match(self, result_url: str) -> dict:
+        """
+        Xác thực và phân định kết quả 1 lần duy nhất từ nguồn tin cậy
+        """
+        if self.is_resolved:
+            raise Exception("Match has already been resolved")
+
+        prompt = f"""
+        Fetch official result from match-bound source: {result_url}
+        Match ID: {self.match_id} ({self.home_team} vs {self.away_team})
+
+        Respond ONLY in JSON format:
+        {{
+            "winner": "Team Name or Draw",
+            "score": "X-Y"
+        }}
+        """
+
+        ai_response = gl.exec_prompt(prompt)
+        
+        self.is_resolved = True
+        self.winning_team = ai_response.get("winner", "")
+        self.final_score = ai_response.get("score", "")
+
+        return {
+            "winner": self.winning_team,
+            "score": self.final_score
         }
